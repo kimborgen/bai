@@ -1,0 +1,52 @@
+device: "cuda"
+
+debug:
+  show_images: true
+  show_images_in_real_time: true
+
+minedojo:
+  minecraft_rgb_shape: [160, 256]
+  task_id: "open-ended"
+  world_seed: 42
+  generate_world_type: "specified_biome"
+  specified_biome: "plains"
+  minecraft_world_radius: 29999984
+
+preprocess_vision:
+  intensity_treshold: 10
+  downscale_factor: 2
+  event_frame_shape: "derived"
+
+env_control:
+  max_next_goal_distance: 100
+  max_goals: 20
+  stuck_threshold: 13
+  small_stuck_treshold: 2
+  stuck_treshold_items: 1800
+  small_stuck_treshold_items: 180
+
+topology_net:
+  pos_xz:
+    num_outputs: 150
+    pc: 6
+  orientation:
+    num_outputs: 10
+    pc: 3
+  pos_y:
+    num_outputs: 5
+    pc: 2
+  maxpool2d_kernel: 2
+  conv_kernel: 5
+  conv_stride: 2
+  conv1_output_dim: 12
+  conv2_output_dim: 64
+  hidden_scale: 1
+  alpha: 0.9
+  slope: 25
+  spike_grad: "fast_sigmoid"
+  beta: 0.5
+  num_steps: 50
+  batch_size: 1
+
+agent_net:
+  num_outputs: 60
