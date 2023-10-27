@@ -26,14 +26,16 @@ env_control:
   small_stuck_treshold_items: 180
 
 topology_net:
+  train: True
   pos_xz:
-    num_outputs: 150
-    pc: 6
+    num_outputs: 4
+    pop_code: 50
+    torus_radius: 1
   orientation:
-    num_outputs: 10
+    num_outputs: 0
     pc: 3
   pos_y:
-    num_outputs: 5
+    num_outputs: 0
     pc: 2
   maxpool2d_kernel: 2
   conv_kernel: 5
@@ -47,6 +49,7 @@ topology_net:
   beta: 0.5
   num_steps: 50
   batch_size: 1
+  lr: 0.002
 
 agent_net:
   num_outputs: 60

@@ -6,6 +6,8 @@ class EnvironmentControl():
     def __init__(self, cfg):
         self.cfg = cfg
         self.spawn_position = self._generate_random_coords()
+        self.local_x = 0  # Local x-coordinate initialized to 0
+        self.local_z = 0  # Local z-coordinate initialized to 0
         self.goals = self._generate_goals_list()
         self.previous_positions = []
         self.goals_reached = 0
@@ -19,7 +21,7 @@ class EnvironmentControl():
 
     def _generate_goals_list(self):
         goals = []
-        current_goal = self.spawn_position
+        current_goal = (0, 0)  # Start at local (0, 0)
         for i in range(3):
             next_goal_distance = random.randint(0, self.cfg.env_control.max_next_goal_distance)
             next_goal = (current_goal[0] + next_goal_distance, current_goal[1] + next_goal_distance)
@@ -32,10 +34,10 @@ class EnvironmentControl():
         last_goal = self.goals[-1]
         next_goal = (last_goal[0] + next_goal_distance, last_goal[1] + next_goal_distance)
         return next_goal
-    
+
     def _is_goal_reached(self, pos):
         # Only looking at X and Z coordinates
-        pos_xz = np.array([pos[0], pos[2]])
+        pos_xz = np.array([self.local_x, self.local_z])
         if np.linalg.norm(pos_xz - np.array(self.goals[0])) < 1:
             return True
         return False
@@ -81,14 +83,18 @@ class EnvironmentControl():
 
 
     def step(self, pos):
+        self.local_x = pos[0] - self.spawn_position[0]
+        self.local_z = pos[2] - self.spawn_position[1]
+
+
         if self._check_stuck(pos):
             self.reset()
             return "STUCK"
         
         # if the goal is not reached within 1 minute * 60 fps (3600 steps) then its also stuck  
-        if self.iter > 3600:
-            self.reset()
-            return "TIMEOUT"
+        #if self.iter > 3600:
+        #    self.reset()
+        #    return "TIMEOUT"
         
 
         if self._is_goal_reached(pos):

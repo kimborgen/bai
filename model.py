@@ -62,7 +62,7 @@ class TopologyNet(nn.Module):
         self.lif_conv2 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
         num_conv_outputs = calculate_output_shape(cfg)
         num_hidden = num_conv_outputs * params.hidden_scale
-        num_outputs = params.pos_xz.num_outputs + params.orientation.num_outputs + params.pos_y.num_outputs
+        num_outputs = params.pos_xz.num_outputs * params.pos_xz.pop_code + params.orientation.num_outputs + params.pos_y.num_outputs
         self.fc1 = nn.Linear(num_conv_outputs, num_hidden)
         self.lif_fc1 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
         self.fc2 = nn.Linear(num_hidden, num_hidden)
@@ -71,6 +71,8 @@ class TopologyNet(nn.Module):
         self.lif_fc3 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
         self.fc4 = nn.Linear(num_hidden, num_outputs)
         self.lif_fc4 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
+
+        self.out_spks = torch.Tensor().to(self.cfg.device)
 
         self.reset()
 
@@ -82,6 +84,7 @@ class TopologyNet(nn.Module):
         self.mem_fc2 = self.lif_fc2.init_leaky()
         self.mem_fc3 = self.lif_fc3.init_leaky()
         self.mem_fc4 = self.lif_fc4.init_leaky()
+        self.out_spks = torch.Tensor().to(self.cfg.device)
 
     def forward(self, x):
         conv1 = self.conv1(x)
@@ -106,9 +109,9 @@ class TopologyNet(nn.Module):
         cur_fc4 = self.fc4(spk_fc3.view(self.params.batch_size, -1))
         spk_fc4, self.mem_fc4 = self.lif_fc4(cur_fc4, self.mem_fc4)
 
-        return spk_fc4, self.mem_fc4
-    
+        self.out_spks = torch.cat((self.out_spks, spk_fc4), 0) 
 
+        return spk_fc4, self.mem_fc4
 
 def debug_net():
     from config.config import load_config

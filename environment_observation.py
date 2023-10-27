@@ -5,7 +5,7 @@ class EnvironmentObservation():
     def __init__(self, cfg, event_frame, pos, yaw, pitch, goals):
         self.cfg = cfg
         device = self.cfg.device
-        self.event_frame = torch.from_numpy(event_frame).float().to(device)
+        self.event_frame = torch.from_numpy(event_frame).unsqueeze(0).float().to(device)
         self.pos = torch.from_numpy(np.array(pos)).float().to(device)  # Assuming 'pos' is a list or array-like
         tmp = np.array([yaw, pitch])
         self.orientation = torch.from_numpy(tmp).float().to(device)
