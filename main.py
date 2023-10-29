@@ -15,7 +15,7 @@ import torch.nn.functional as torchF
 from model import TopologyNet
 from config.config import load_config
 import random
-
+import math
 from matplotlib.animation import FuncAnimation
 
 def rgb_to_gray(cfg, rgb_img):
@@ -190,14 +190,24 @@ def spike_history_to_clifford(cfg, spks):
     scaled_spks = averaged_spks * 2 - 1
     return scaled_spks
 
-def xz_to_clifford(cfg, x,z):
-    x = torch.tensor([x], dtype=torch.float32)
-    z = torch.tensor([z], dtype=torch.float32)
+def coords_to_rad_scaling_factor(cfg):
+    return (2 * math.pi) / cfg.topology_net.pos_xz.coord_wrap
 
-    cos_theta = torch.cos(x)
-    sin_theta = torch.sin(x)
-    cos_phi = torch.cos(z)
-    sin_phi = torch.sin(z)
+def coords_to_rad(cfg, coords):
+    scaling_factor = coords_to_rad_scaling_factor(cfg)
+    return coords * scaling_factor
+
+def rad_to_coords(cfg, coords):
+    scaling_factor = coords_to_rad_scaling_factor(cfg)
+    return coords / scaling_factor
+
+def coords_to_clifford(cfg, coords):
+    coords_rad = coords_to_rad(cfg, coords)
+
+    cos_theta = torch.cos(coords_rad[0])
+    sin_theta = torch.sin(coords_rad[0])
+    cos_phi = torch.cos(coords_rad[1])
+    sin_phi = torch.sin(coords_rad[1])
 
     result = torch.tensor([cos_theta, sin_theta, cos_phi, sin_phi], device=cfg.device)
     return result
@@ -267,8 +277,15 @@ def gameLoop(cfg, plot_queue):
     loss_hist = []
     test_acc_hist = []
 
+    env_iteration = 77
+
+    td_gray_frames = torch.empty((0,80,128), device=cfg.device)
+    td_event_frames = torch.empty((0,80,128), device=cfg.device)
+    td_local_coords = torch.empty((0,2), device=cfg.device)
+    td_clifford_coords = torch.empty((0,4), device=cfg.device) 
+
     target_clifford = torch.empty((0,4), dtype=torch.float32).to(cfg.device)
-    max_loops = 100000
+    max_loops = 1000000000
     pbar = tqdm(total=max_loops, desc="Processing", dynamic_ncols=True)
     for i in range(max_loops):
         start_time = time.time()
@@ -277,35 +294,44 @@ def gameLoop(cfg, plot_queue):
         #print(modelInputs)
 
         # model forward pass to determine action
-        if cfg.topology_net.train:
-            tNet.train()
-        out_spk = tNet(modelInputs.event_frame)
-        out_spks = tNet.out_spks
+        #if cfg.topology_net.train:
+        #    tNet.train()
+        #out_spk = tNet(modelInputs.event_frame)
+        #out_spks = tNet.out_spks
 
         action = decideAction(cfg, env, i)
 
         obs, _, done, _ = env.step(action)
         obs, reward_str, didEnvReset = rl_env_step(cfg, env, envControl, obs, done)
-        if i % 1000 == 0 and i != 0:
-            didEnvReset = True
-            reward_str = "POSITIVE"
+        #if i % 1000 == 0 and i != 0:
+        #    didEnvReset = True
+        #    reward_str = "POSITIVE"
 
-        cliff = xz_to_clifford(cfg, envControl.local_x, envControl.local_z) 
-        target_clifford = torch.cat((target_clifford, cliff.unsqueeze(0)), dim=0)
+        # training_data_gen:)
+
+        coords = torch.tensor([envControl.local_x, envControl.local_z], dtype=torch.float32, device=cfg.device)
+
+        cliff = coords_to_clifford(cfg, coords)
+
+        # training data gen
+        td_gray_frames = torch.cat((td_gray_frames, torch.from_numpy(prev_gray_frame).unsqueeze(0).to(cfg.device)), dim=0)
+        td_event_frames = torch.cat((td_event_frames, torch.from_numpy(event_frame).unsqueeze(0).to(cfg.device)), dim=0)
+        td_local_coords = torch.cat((td_local_coords, torch.tensor((envControl.local_x, envControl.local_z)).unsqueeze(0).to(cfg.device)), dim=0)
+        td_clifford_coords = torch.cat((td_clifford_coords, cliff.unsqueeze(0)), dim=0)
 
         # clean up
         # remember to reset model memories on reset
 
         loss = None
-        if didEnvReset:
-             # model training
-            if cfg.topology_net.train and target_clifford.shape[0] > 1:
-                loss = topology_net_train(cfg, tNet, target_clifford, optimizer)
+        #if didEnvReset:
+        #     # model training
+        #    if cfg.topology_net.train and target_clifford.shape[0] > 1:
+        #        loss = topology_net_train(cfg, tNet, target_clifford, optimizer)
 
-                target_clifford = torch.empty((0,4), dtype=torch.float32).to(cfg.device)
-                tNet.reset()
+        #        target_clifford = torch.empty((0,4), dtype=torch.float32).to(cfg.device)
+        #        tNet.reset()
 
-        if didEnvReset or plot_queue.empty():
+        if cfg.debug.show_images and (didEnvReset or plot_queue.empty()):
             plot_data = {
                 "images": (prev_gray_frame, event_frame),
                 "coordinates":((envControl.local_x, envControl.local_z), (0,0)),
@@ -315,7 +341,24 @@ def gameLoop(cfg, plot_queue):
             plot_queue.put(plot_data)
 
         if didEnvReset:
+            # Example of writing each epoch to disk
+            file_path = f"data/localization/data_{env_iteration}.pt"
+            torch.save({
+                'td_gray_frames': td_gray_frames,
+                'td_event_frames': td_event_frames,
+                'td_local_coords': td_local_coords,
+                'td_clifford_coords': td_clifford_coords
+            }, file_path)
+
+            td_gray_frames = torch.empty((0,80,128), device=cfg.device)
+            td_event_frames = torch.empty((0,80,128), device=cfg.device)
+            td_local_coords = torch.empty((0,2), device=cfg.device)
+            td_clifford_coords = torch.empty((0,4), device=cfg.device) 
+
+            env_iteration += 1
+
             envControl.reset()
+
 
         elapsed_time = time.time() - start_time
         framerate = 1 / elapsed_time if elapsed_time > 0 else float('inf')

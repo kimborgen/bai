@@ -1,7 +1,7 @@
 device: "cuda"
 
 debug:
-  show_images: true
+  show_images: false
   show_images_in_real_time: true
 
 minedojo:
@@ -31,6 +31,7 @@ topology_net:
     num_outputs: 4
     pop_code: 50
     torus_radius: 1
+    coord_wrap: 50
   orientation:
     num_outputs: 0
     pc: 3
@@ -42,14 +43,15 @@ topology_net:
   conv_stride: 2
   conv1_output_dim: 12
   conv2_output_dim: 64
-  hidden_scale: 1
+  hidden_scale: 4
   alpha: 0.9
   slope: 25
   spike_grad: "fast_sigmoid"
-  beta: 0.5
+  beta: 0.8
   num_steps: 50
   batch_size: 1
-  lr: 0.002
+  lr: 0.05
+  ephocs: 1000
 
 agent_net:
   num_outputs: 60

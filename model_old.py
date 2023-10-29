@@ -19,7 +19,6 @@ from torchsummary import summary
 import os
 from tqdm import tqdm
 import torch.nn.functional as torchF
-import matplotlib.pyplot as plt
 
 def calculate_output_shape(cfg):
     # Unpack input shape
@@ -67,7 +66,6 @@ class TopologyNet(nn.Module):
         num_conv_outputs = calculate_output_shape(cfg)
         num_hidden = num_conv_outputs * params.hidden_scale
         num_outputs = params.pos_xz.num_outputs * params.pos_xz.pop_code + params.orientation.num_outputs + params.pos_y.num_outputs
-        self.flatten = nn.Flatten()
         self.fc1 = nn.Linear(num_conv_outputs, num_hidden)
         self.lif_fc1 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
         self.fc2 = nn.Linear(num_hidden, num_hidden)
@@ -77,57 +75,49 @@ class TopologyNet(nn.Module):
         self.fc4 = nn.Linear(num_hidden, num_outputs)
         self.lif_fc4 = snn.Leaky(beta=params.beta, spike_grad=spike_grad, output=True)
 
+        self.out_spks = torch.empty(0, device=self.cfg.device)
+
+        self.reset()
+
+    def reset(self):
+        # Initialize hidden states and outputs at t=0
+        self.mem_conv1 = self.lif_conv1.init_leaky()
+        self.mem_conv2 = self.lif_conv2.init_leaky()
+        self.mem_fc1 = self.lif_fc1.init_leaky()
+        self.mem_fc2 = self.lif_fc2.init_leaky()
+        self.mem_fc3 = self.lif_fc3.init_leaky()
+        self.mem_fc4 = self.lif_fc4.init_leaky()
         #self.out_spks = torch.empty(0, device=self.cfg.device)
 
-
     def forward(self, x):
-        mem_conv1 = self.lif_conv1.init_leaky()
-        mem_conv2 = self.lif_conv2.init_leaky()
-        mem_fc1 = self.lif_fc1.init_leaky()
-        mem_fc2 = self.lif_fc2.init_leaky()
-        mem_fc3 = self.lif_fc3.init_leaky()
-        mem_fc4 = self.lif_fc4.init_leaky()
-
-        conv1 = self.conv1(x.unsqueeze(0).permute(1,0,2,3))
+        conv1 = self.conv1(x)
         cur_conv1 = self.maxpool(conv1)
-        spk_conv1, mem_conv1 = self.lif_conv1(cur_conv1, mem_conv1)
-        spk_conv1_sum = spk_conv1.sum()
-        #print()
+        spk_conv1, self.mem_conv1 = self.lif_conv1(cur_conv1, self.mem_conv1)
+        #print(spk_conv1.sum() >= 1)
         conv2 = self.conv2(spk_conv1)
         cur_conv2 = self.maxpool(conv2)
-        spk_conv2, mem_conv2 = self.lif_conv2(cur_conv2, mem_conv2)
-        spk_conv2_sum = spk_conv2.sum()
-        #print(spk_conv2.sum())
-        #reshaped = spk_conv2.view(self.params.batch_size, -1)
-
-    
-        
-        flat = self.flatten(spk_conv2)
-        cur_fc1 = self.fc1(flat)
-        spk_fc1, mem_fc1 = self.lif_fc1(cur_fc1, mem_fc1)
-        #print(spk_fc1.sum())
-        spk_fc1_sum = spk_fc1.sum()
+        spk_conv2, self.mem_conv2 = self.lif_conv2(cur_conv2, self.mem_conv2)
+        #print(spk_conv2.sum() >= 1)
+        reshaped = spk_conv2.view(self.params.batch_size, -1)
+        cur_fc1 = self.fc1(reshaped)
+        spk_fc1, self.mem_fc1 = self.lif_fc1(cur_fc1, self.mem_fc1)
+        #print(spk_fc1.sum() >= 1)
         cur_fc2 = self.fc2(spk_fc1)
-        spk_fc2, mem_fc2 = self.lif_fc2(cur_fc2, mem_fc2)
-        #print(spk_fc2.sum())
-        spk_fc2_sum = spk_fc2.sum()
+        spk_fc2, self.mem_fc2 = self.lif_fc2(cur_fc2, self.mem_fc2)
+        #print(spk_fc2.sum() >= 1)
 
         #cur_fc3 = self.fc3(spk_fc2.view(self.params.batch_size, -1))
         cur_fc3 = self.fc3(spk_fc2)
-        spk_fc3, mem_fc3 = self.lif_fc3(cur_fc3, mem_fc3)
-        spk_fc3_sum = spk_fc3.sum()
-
-        #print(spk_fc3.sum())
+        spk_fc3, self.mem_fc3 = self.lif_fc3(cur_fc3, self.mem_fc3)
+        #print(spk_fc3.sum() >= 1)
 
         #respahed = spk_fc3.view(self.params.batch_size, -1)
         cur_fc4 = self.fc4(spk_fc3)
-        spk_fc4, mem_fc4 = self.lif_fc4(cur_fc4, mem_fc4)
-        spk_fc4_sum = spk_fc4.sum()
-
-        #print(spk_fc4.sum())
+        spk_fc4, self.mem_fc4 = self.lif_fc4(cur_fc4, self.mem_fc4)
+        #print(spk_fc4.sum() >= 1)
         #self.out_spks = torch.cat((self.out_spks, spk_fc4), 0) 
-    
-        return spk_fc4, mem_fc4
+
+        return spk_fc4, self.mem_fc4
 
 def debug_net():
     from config.config import load_config
@@ -226,48 +216,27 @@ def train():
 
     file_paths = [f for f in os.listdir('data/localization') if f.endswith('.pt')]
     torch.autograd.set_detect_anomaly(True)
+    for file_path in tqdm(file_paths):
+        # Load the tensor dictionary from the current file
+        tensor_dict = torch.load("data/localization/" + file_path)
+        td_gray_frames = tensor_dict["td_gray_frames"].to(cfg.device)
+        td_event_frames = tensor_dict['td_event_frames'].to(cfg.device)
+        td_local_coords = tensor_dict['td_local_coords'].to(cfg.device)
+        td_clifford_coords = tensor_dict['td_clifford_coords'].to(cfg.device)
+        optimizer.zero_grad()
 
-       
-    plt.ion()  # Turn interactive mode on
-    fig, ax = plt.subplots()  # Create a figure and axis object for updating
-   
-
-    for epoch in tqdm(range(cfg.topology_net.ephocs)):
-        for file_path in tqdm(file_paths):
-            # Load the tensor dictionary from the current file
-            tensor_dict = torch.load("data/localization/" + file_path)
-            td_gray_frames = tensor_dict["td_gray_frames"].to(cfg.device)
-            td_event_frames = tensor_dict['td_event_frames'].to(cfg.device)
-            td_local_coords = tensor_dict['td_local_coords'].to(cfg.device)
-            td_clifford_coords = tensor_dict['td_clifford_coords'].to(cfg.device)
-
-            spks, mems = tNet(td_event_frames)
-            #print(spks.sum())
+        for frame in range(td_event_frames.shape[0]): 
+            event_frame = td_event_frames[frame].unsqueeze(0)
+            target_coords = td_clifford_coords[frame].unsqueeze(0)
+            spks, mems = tNet(event_frame)
 
             out_clifford_coords = spikes_to_clifford(cfg, spks)
-            loss = torchF.mse_loss(out_clifford_coords, td_clifford_coords)
-            loss_hist.append(loss.item())  # append loss of current iteration to loss_hist
-            #print(loss)
-    
-            optimizer.zero_grad()
-            loss.backward()
+            loss = torchF.mse_loss(out_clifford_coords, target_coords)
+            print(loss)
+
+            loss.backward(retain_graph=True)
             optimizer.step()
-            #print("\n\n")
-
-        ax.clear()  # clear previous plot
-        ax.plot(loss_hist)
-        ax.set_xlabel('Iteration')
-        ax.set_ylabel('Loss')
-        ax.set_title('Loss Curve')
-        ax.set_ylim([0, 1])
-        fig.canvas.draw()
-        fig.canvas.flush_events()
-
-        print("epoch ", epoch, " finished ")
-        print("average loss", np.mean(loss_hist))
-        print("Avergae loss last epoch", np.mean(loss_hist[-len(file_paths):]))
-
-        torch.save(tNet.state_dict(), f'model_dict/model.pt')
+        tNet.reset()
 
   
 if __name__ == "__main__":
