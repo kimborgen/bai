@@ -43,7 +43,7 @@ topology_net:
   conv_stride: 2
   conv1_output_dim: 12
   conv2_output_dim: 64
-  hidden_scale: 4
+  hidden_scale: 1
   alpha: 0.9
   slope: 25
   spike_grad: "fast_sigmoid"

@@ -17,6 +17,7 @@ from config.config import load_config
 import random
 import math
 from matplotlib.animation import FuncAnimation
+import os
 
 def rgb_to_gray(cfg, rgb_img):
     frame = cv2.cvtColor(rgb_img.transpose(1, 2, 0), cv2.COLOR_RGB2GRAY)
@@ -277,7 +278,9 @@ def gameLoop(cfg, plot_queue):
     loss_hist = []
     test_acc_hist = []
 
-    env_iteration = 77
+    file_paths = [f for f in os.listdir('data/localization') if f.endswith('.pt')]
+
+    env_iteration = len(file_paths)
 
     td_gray_frames = torch.empty((0,80,128), device=cfg.device)
     td_event_frames = torch.empty((0,80,128), device=cfg.device)
@@ -342,7 +345,7 @@ def gameLoop(cfg, plot_queue):
 
         if didEnvReset:
             # Example of writing each epoch to disk
-            file_path = f"data/localization/data_{env_iteration}.pt"
+            file_path = f"data/localization/data_d_{env_iteration}.pt"
             torch.save({
                 'td_gray_frames': td_gray_frames,
                 'td_event_frames': td_event_frames,

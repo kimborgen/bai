@@ -60,16 +60,18 @@ class TopologyNet(nn.Module):
         spike_grad = surrogate.fast_sigmoid(slope=params.slope)
 
         # Initialize layers
-        self.conv1 = nn.Conv2d(1, params.conv1_output_dim, params.conv_kernel, stride=params.conv_stride)
-        self.lif_conv1 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
-        self.maxpool = nn.MaxPool2d(params.maxpool2d_kernel)
-        self.conv2 = nn.Conv2d(params.conv1_output_dim, params.conv2_output_dim, params.conv_kernel, stride=params.conv_stride)
-        self.lif_conv2 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
-        num_conv_outputs = calculate_output_shape(cfg)
-        num_hidden = num_conv_outputs * params.hidden_scale
+        #self.conv1 = nn.Conv2d(1, params.conv1_output_dim, params.conv_kernel, stride=params.conv_stride)
+        #self.lif_conv1 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
+        #self.maxpool = nn.MaxPool2d(params.maxpool2d_kernel)
+        #self.conv2 = nn.Conv2d(params.conv1_output_dim, params.conv2_output_dim, params.conv_kernel, stride=params.conv_stride)
+        #self.lif_conv2 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
+        #num_conv_outputs = calculate_output_shape(cfg)
+        #num_hidden = num_conv_outputs * params.hidden_scale
         num_outputs = params.pos_xz.num_outputs * params.pos_xz.pop_code + params.orientation.num_outputs + params.pos_y.num_outputs
+        num_inps = 80*128
+        num_hidden = num_inps * params.hidden_scale
         self.flatten = nn.Flatten()
-        self.fc1 = nn.Linear(num_conv_outputs, num_hidden)
+        self.fc1 = nn.Linear(num_inps, num_hidden)
         self.lif_fc1 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
         self.fc2 = nn.Linear(num_hidden, num_hidden)
         self.lif_fc2 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
@@ -82,28 +84,28 @@ class TopologyNet(nn.Module):
 
 
     def forward(self, x):
-        mem_conv1 = self.lif_conv1.init_leaky()
-        mem_conv2 = self.lif_conv2.init_leaky()
+        #mem_conv1 = self.lif_conv1.init_leaky()
+        #mem_conv2 = self.lif_conv2.init_leaky()
         mem_fc1 = self.lif_fc1.init_leaky()
         mem_fc2 = self.lif_fc2.init_leaky()
         mem_fc3 = self.lif_fc3.init_leaky()
         mem_fc4 = self.lif_fc4.init_leaky()
 
-        conv1 = self.conv1(x.unsqueeze(0).permute(1,0,2,3))
-        cur_conv1 = self.maxpool(conv1)
-        spk_conv1, mem_conv1 = self.lif_conv1(cur_conv1, mem_conv1)
-        spk_conv1_sum = spk_conv1.sum()
+        #conv1 = self.conv1(x.unsqueeze(0).permute(1,0,2,3))
+        #cur_conv1 = self.maxpool(conv1)
+        #spk_conv1, mem_conv1 = self.lif_conv1(cur_conv1, mem_conv1)
+        #spk_conv1_sum = spk_conv1.sum()
         #print()
-        conv2 = self.conv2(spk_conv1)
-        cur_conv2 = self.maxpool(conv2)
-        spk_conv2, mem_conv2 = self.lif_conv2(cur_conv2, mem_conv2)
-        spk_conv2_sum = spk_conv2.sum()
+        #conv2 = self.conv2(spk_conv1)
+        #cur_conv2 = self.maxpool(conv2)
+        #spk_conv2, mem_conv2 = self.lif_conv2(cur_conv2, mem_conv2)
+        #spk_conv2_sum = spk_conv2.sum()
         #print(spk_conv2.sum())
         #reshaped = spk_conv2.view(self.params.batch_size, -1)
 
     
         
-        flat = self.flatten(spk_conv2)
+        flat = self.flatten(x)
         cur_fc1 = self.fc1(flat)
         spk_fc1, mem_fc1 = self.lif_fc1(cur_fc1, mem_fc1)
         #print(spk_fc1.sum())
@@ -270,8 +272,10 @@ def train():
             del td_event_frames
             del td_clifford_coords
             del tensor_dict
+
             torch.cuda.empty_cache()  # This will release the GPU memory back to the system
 
+            
             if i % 300 == 0:
                 ax.clear()  # clear previous plot
                 ax.plot(loss_hist)
