@@ -40,6 +40,8 @@ def calculate_output_shape(cfg):
     pool1_out_height = (conv1_out_height - pool_kernel_size) // pool_stride + 1
     pool1_out_width = (conv1_out_width - pool_kernel_size) // pool_stride + 1
     
+    first_output = cfg.topology_net.conv1_output_dim * pool1_out_height * pool1_out_width
+
     # Second Convolutional Layer
     conv2_out_height = (pool1_out_height - conv_kernel_size) // conv_stride + 1
     conv2_out_width = (pool1_out_width - conv_kernel_size) // conv_stride + 1
@@ -47,8 +49,10 @@ def calculate_output_shape(cfg):
     # Second Max Pooling Layer
     pool2_out_height = (conv2_out_height - pool_kernel_size) // pool_stride + 1
     pool2_out_width = (conv2_out_width - pool_kernel_size) // pool_stride + 1
-    
-    return cfg.topology_net.conv2_output_dim * pool2_out_height * pool2_out_width
+
+    second_output = cfg.topology_net.conv2_output_dim * pool2_out_height * pool2_out_width
+ 
+    return first_output, pool1_out_width, second_output, pool2_out_width 
 
 class TopologyNet(nn.Module):
     def __init__(self, cfg):
@@ -59,34 +63,61 @@ class TopologyNet(nn.Module):
         assert self.params.spike_grad == "fast_sigmoid"
         spike_grad = surrogate.fast_sigmoid(slope=params.slope)
 
-        # Initialize layers
-        self.conv1 = nn.Conv2d(1, params.conv1_output_dim, params.conv_kernel, stride=params.conv_stride)
-        self.lif_conv1 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
-        self.maxpool = nn.MaxPool2d(params.maxpool2d_kernel)
-        self.conv2 = nn.Conv2d(params.conv1_output_dim, params.conv2_output_dim, params.conv_kernel, stride=params.conv_stride)
-        self.lif_conv2 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
-        num_conv_outputs = calculate_output_shape(cfg)
-        num_hidden = num_conv_outputs * params.hidden_scale
+        # For convolutional layers, you might need to determine the number of output features
+        # based on the input size, stride, padding, and kernel size. 
+        # Here I'm assuming some arbitrary numbers as placeholders:
+
+        num_firstconv, num_firstconv_width, num_secondconv, num_secondconv_width = calculate_output_shape(cfg)
+        num_hidden = num_secondconv * params.hidden_scale
         num_outputs = params.pos_xz.num_outputs * params.pos_xz.pop_code + params.orientation.num_outputs + params.pos_y.num_outputs
+        
+
+        # Initialize learnable beta and threshold parameters for each layer
+        beta_conv1 = torch.rand(num_firstconv_width, device=cfg.device, requires_grad=True)
+        threshold_conv1 = torch.rand(num_firstconv_width, device=cfg.device, requires_grad=True)
+
+        beta_conv2 = torch.rand(num_secondconv_width, device=cfg.device, requires_grad=True)
+        threshold_conv2 = torch.rand(num_secondconv_width, device=cfg.device, requires_grad=True)
+
+        beta_fc1 = torch.rand(num_hidden, device=cfg.device, requires_grad=True)
+        threshold_fc1 = torch.rand(num_hidden, device=cfg.device, requires_grad=True)
+
+        beta_fc4 = torch.rand(num_outputs, device=cfg.device, requires_grad=True)
+        threshold_fc4 = torch.rand(num_outputs, device=cfg.device, requires_grad=True)
+
+
+        # Initialize layers
+        # shared
+        self.maxpool = nn.MaxPool2d(params.maxpool2d_kernel)
+
+
+        # first conv
+        self.conv1 = nn.Conv2d(1, params.conv1_output_dim, params.conv_kernel, stride=params.conv_stride)
+        self.lif_conv1 = snn.Leaky(beta=beta_conv1, learn_beta=True, threshold=threshold_conv1, learn_threshold=True, spike_grad=spike_grad)
+
+        # second conv
+        self.conv2 = nn.Conv2d(params.conv1_output_dim, params.conv2_output_dim, params.conv_kernel, stride=params.conv_stride)
+        self.lif_conv2 = snn.Leaky(beta=beta_conv2, learn_beta=True, threshold=threshold_conv2, learn_threshold=True, spike_grad=spike_grad)
         self.flatten = nn.Flatten()
-        self.fc1 = nn.Linear(num_conv_outputs, num_hidden)
-        self.lif_fc1 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
-        self.fc2 = nn.Linear(num_hidden, num_hidden)
-        self.lif_fc2 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
-        self.fc3 = nn.Linear(num_hidden, num_hidden)
-        self.lif_fc3 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
+
+        
+        self.fc1 = nn.Linear(num_secondconv, num_hidden)
+        self.lif_fc1 = snn.Leaky(beta=beta_fc1, learn_beta=True, threshold=threshold_fc1, learn_threshold=True, spike_grad=spike_grad)
+        #self.fc2 = nn.Linear(num_hidden, num_hidden)
+        #self.lif_fc2 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
+        #self.fc3 = nn.Linear(num_hidden, num_hidden)
+        #self.lif_fc3 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
         self.fc4 = nn.Linear(num_hidden, num_outputs)
-        self.lif_fc4 = snn.Leaky(beta=params.beta, spike_grad=spike_grad, output=True)
+        self.lif_fc4 = snn.Leaky(beta=beta_fc4, learn_beta=True, threshold=threshold_fc4, learn_threshold=True, spike_grad=spike_grad, output=True)
 
         #self.out_spks = torch.empty(0, device=self.cfg.device)
-
 
     def forward(self, x):
         mem_conv1 = self.lif_conv1.init_leaky()
         mem_conv2 = self.lif_conv2.init_leaky()
         mem_fc1 = self.lif_fc1.init_leaky()
-        mem_fc2 = self.lif_fc2.init_leaky()
-        mem_fc3 = self.lif_fc3.init_leaky()
+        #mem_fc2 = self.lif_fc2.init_leaky()
+        #mem_fc3 = self.lif_fc3.init_leaky()
         mem_fc4 = self.lif_fc4.init_leaky()
 
         conv1 = self.conv1(x.unsqueeze(0).permute(1,0,2,3))
@@ -107,21 +138,21 @@ class TopologyNet(nn.Module):
         cur_fc1 = self.fc1(flat)
         spk_fc1, mem_fc1 = self.lif_fc1(cur_fc1, mem_fc1)
         #print(spk_fc1.sum())
-        spk_fc1_sum = spk_fc1.sum()
-        cur_fc2 = self.fc2(spk_fc1)
-        spk_fc2, mem_fc2 = self.lif_fc2(cur_fc2, mem_fc2)
+        #spk_fc1_sum = spk_fc1.sum()
+        #cur_fc2 = self.fc2(spk_fc1)
+        #spk_fc2, mem_fc2 = self.lif_fc2(cur_fc2, mem_fc2)
         #print(spk_fc2.sum())
-        spk_fc2_sum = spk_fc2.sum()
+        #spk_fc2_sum = spk_fc2.sum()
 
         #cur_fc3 = self.fc3(spk_fc2.view(self.params.batch_size, -1))
-        cur_fc3 = self.fc3(spk_fc2)
-        spk_fc3, mem_fc3 = self.lif_fc3(cur_fc3, mem_fc3)
-        spk_fc3_sum = spk_fc3.sum()
+        #cur_fc3 = self.fc3(spk_fc2)
+        #spk_fc3, mem_fc3 = self.lif_fc3(cur_fc3, mem_fc3)
+        #spk_fc3_sum = spk_fc3.sum()
 
         #print(spk_fc3.sum())
 
         #respahed = spk_fc3.view(self.params.batch_size, -1)
-        cur_fc4 = self.fc4(spk_fc3)
+        cur_fc4 = self.fc4(spk_fc1)
         spk_fc4, mem_fc4 = self.lif_fc4(cur_fc4, mem_fc4)
         spk_fc4_sum = spk_fc4.sum()
 
@@ -245,6 +276,8 @@ def train():
     validation_files = file_paths[train_size:train_size + validation_size]
     test_files = file_paths[train_size + validation_size:]
 
+    iter_steps = 30
+
     for epoch in tqdm(range(cfg.topology_net.ephocs)):
         for i, file_path in enumerate(tqdm(train_files)):
             # Load the tensor dictionary from the current file
@@ -253,35 +286,43 @@ def train():
             td_event_frames = tensor_dict['td_event_frames'].to(cfg.device)
             #td_local_coords = tensor_dict['td_local_coords'].to(cfg.device)
             td_clifford_coords = tensor_dict['td_clifford_coords'].to(cfg.device)
+            
+            steps = len(td_event_frames) // iter_steps
+            for i in range(steps):
+                ef = td_event_frames[:i*iter_steps]
+                if (ef.numel() == False):
+                    continue
+                spks, _ = tNet(ef)
+                #print(spks.sum())
+                variances = spks.var(dim=1).detach().cpu().numpy()
+                var_2 = spks.var(dim=1).var(dim=0).detach().cpu().numpy()
 
-            spks, mems = tNet(td_event_frames)
-            #print(spks.sum())
 
-            out_clifford_coords = spikes_to_clifford(cfg, spks)
-            loss = torchF.mse_loss(out_clifford_coords, td_clifford_coords)
-            loss_hist.append(loss.item())  # append loss of current iteration to loss_hist
-            #print(loss)
-    
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            #print("\n\n")
+                out_clifford_coords = spikes_to_clifford(cfg, spks)
+                loss = torchF.mse_loss(out_clifford_coords, td_clifford_coords[:i*iter_steps])
+                loss_hist.append(loss.item())  # append loss of current iteration to loss_hist
+                #print(loss)
+        
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                #print("\n\n")
 
             del td_event_frames
             del td_clifford_coords
             del tensor_dict
             torch.cuda.empty_cache()  # This will release the GPU memory back to the system
 
-            if i % 300 == 0:
-                ax.clear()  # clear previous plot
-                ax.plot(loss_hist)
-                ax.set_xlabel('Iteration')
-                ax.set_ylabel('Loss')
-                ax.set_title('Loss Curve')
-                ax.set_ylim([0, 1])
-                fig.canvas.draw()
-                fig.canvas.flush_events()
+            ax.clear()  # clear previous plot
+            ax.plot(loss_hist)
+            ax.set_xlabel('Iteration')
+            ax.set_ylabel('Loss')
+            ax.set_title('Loss Curve')
+            ax.set_ylim([0, 1])
+            fig.canvas.draw()
+            fig.canvas.flush_events()
 
+        """
         ax.clear()  # clear previous plot
         ax.plot(loss_hist)
         ax.set_xlabel('Iteration')
@@ -290,6 +331,7 @@ def train():
         ax.set_ylim([0, 1])
         fig.canvas.draw()
         fig.canvas.flush_events()
+        """
         print("epoch ", epoch, " finished ")
         print("average loss", np.mean(loss_hist))
         print("Avergae loss last epoch", np.mean(loss_hist[-len(file_paths):]))

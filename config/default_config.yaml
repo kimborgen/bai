@@ -39,6 +39,7 @@ topology_net:
     num_outputs: 0
     pc: 2
   maxpool2d_kernel: 2
+  maxpool2d_stride: 2
   conv_kernel: 5
   conv_stride: 2
   conv1_output_dim: 12
@@ -47,7 +48,7 @@ topology_net:
   alpha: 0.9
   slope: 25
   spike_grad: "fast_sigmoid"
-  beta: 0.8
+  beta: 0.2
   num_steps: 50
   batch_size: 1
   lr: 0.05
