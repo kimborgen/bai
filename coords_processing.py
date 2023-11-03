@@ -12,8 +12,6 @@ def spike_history_to_clifford(cfg, spks):
     weights = torch.exp(log_space)
     weights /= weights.sum()  # Normalize to sum to 1
 
-    # ... rest of your code ...
-
     # Compute the weighted average along the 0-th dimension (over the iterations)
     # Expand dimensions of weights to match the dimensions of window_spks
     weights_expanded = weights.unsqueeze(1)
@@ -34,7 +32,7 @@ def rad_to_coords(cfg, coords):
     scaling_factor = coords_to_rad_scaling_factor(cfg)
     return coords / scaling_factor
 
-def coords_to_clifford(cfg, coords):
+def coord_to_clifford(cfg, coords):
     coords_rad = coords_to_rad(cfg, coords)
 
     cos_theta = torch.cos(coords_rad[0])
@@ -44,6 +42,23 @@ def coords_to_clifford(cfg, coords):
 
     result = torch.tensor([cos_theta, sin_theta, cos_phi, sin_phi], device=cfg.device)
     return result
+
+def coords_to_clifford(cfg, coords):
+    coords_rad = coords_to_rad(cfg, coords)
+
+    # Apply trigonometric functions to each element
+    cos_theta = torch.cos(coords_rad[:, 0])  # Cosine of all theta values
+    sin_theta = torch.sin(coords_rad[:, 0])  # Sine of all theta values
+    cos_phi = torch.cos(coords_rad[:, 1])    # Cosine of all phi values
+    sin_phi = torch.sin(coords_rad[:, 1])    # Sine of all phi values
+
+    # Stack all results into a new tensor with shape [4, n]
+    result = torch.stack((cos_theta, sin_theta, cos_phi, sin_phi), dim=0)
+
+    # If you want to maintain the original order as [n, 4], you can transpose
+    result = result.t()
+    return result
+
 
 
 def spikes_to_clifford(cfg, spikes_tensor):

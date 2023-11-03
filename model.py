@@ -23,6 +23,7 @@ import matplotlib.pyplot as plt
 import random
 
 from coords_processing import spike_history_to_clifford, coords_to_rad_scaling_factor, coords_to_rad, rad_to_coords, coords_to_clifford, spikes_to_clifford
+from image_processing import convert_gray_to_event_with_polarity
 
 def calculate_output_shape(cfg):
     # Unpack input shape
@@ -94,7 +95,7 @@ class TopologyNet(nn.Module):
 
 
         # first conv
-        self.conv1 = nn.Conv2d(1, params.conv1_output_dim, params.conv_kernel, stride=params.conv_stride)
+        self.conv1 = nn.Conv2d(2, params.conv1_output_dim, params.conv_kernel, stride=params.conv_stride)
         self.lif_conv1 = snn.Leaky(beta=beta_conv1, learn_beta=True, spike_grad=spike_grad)
 
         # second conv
@@ -125,7 +126,7 @@ class TopologyNet(nn.Module):
     def forward(self, x):
 
 
-        conv1 = self.conv1(x.unsqueeze(0).permute(1,0,2,3))
+        conv1 = self.conv1(x)
         cur_conv1 = self.maxpool(conv1)
         spk_conv1, self.mem_conv1 = self.lif_conv1(cur_conv1, self.mem_conv1)
         spk_conv1_sum = spk_conv1.sum()
@@ -202,8 +203,22 @@ def custom_loss(cfg,out, target):
     return loss
 
 def preprocess_training_data(cfg, tensor_dict, cap):
-    td_gray_frames = tensor_dict["td_gray_frames"].to(cfg.device)
-    td_local_coords = tensor_dict['td_local_coords'].to(cfg.device)
+    # Extract saved tensors and cap them
+    td_gray_frames = tensor_dict["td_gray_frames"][:cap].to(cfg.device)
+    td_local_coords = tensor_dict['td_local_coords'][:cap].to(cfg.device)
+
+    # get event frames
+    event_frames = convert_gray_to_event_with_polarity(cfg, td_gray_frames)
+    
+    # get target
+    targets = coords_to_clifford(cfg, td_local_coords)
+    
+    # drop the first, because the first gray_frame is dropped 
+    targets = targets[1:]
+
+    return event_frames, targets
+
+
 
 def train():
     from config.config import load_config
@@ -236,7 +251,7 @@ def train():
 
     iter_steps = 30
 
-    cap = 100
+    cap = 101
 
     for epoch in tqdm(range(cfg.topology_net.ephocs)):
         for i, file_path in enumerate(tqdm(train_files)):
@@ -244,11 +259,14 @@ def train():
             tensor_dict = torch.load("data/localization/" + file_path)
             
             event_frames, targets = preprocess_training_data(cfg, tensor_dict, cap)
-
             out_clifford_coords = torch.empty((0,4), device=cfg.device)
-            for i in tqdm(range(len(td_event_frames))):
-                ef = td_event_frames[i].unsqueeze(0)
-                spks, _ = tNet(ef)
+            all_spikes = torch.empty((0,200), device=cfg.device)
+
+            for i in tqdm(range(len(event_frames))):
+                # unsqueeze for batch=1
+                ef = event_frames[i].unsqueeze(0)
+                spks, _ = tNet(ef) #spks.shape(1,200) where 1 is batch
+                #all_spikes = torch.cat((all_spikes, spks), dim=0)
                 cliff = spikes_to_clifford(cfg, spks)
                 out_clifford_coords = torch.cat((out_clifford_coords, cliff), dim=0)
             
@@ -256,7 +274,7 @@ def train():
             #loss = torchF.mse_loss(out_clifford_coords, td_clifford_coords)
             #loss_hist.append(loss.item())  # append loss of current iteration to loss_hist
             #print(loss)
-            loss = custom_loss(cfg, out_clifford_coords, td_clifford_coords)
+            loss = custom_loss(cfg, out_clifford_coords, targets)
             loss_hist.append(loss.item())  # append loss of current iteration to loss_hist
     
             optimizer.zero_grad()
@@ -264,7 +282,7 @@ def train():
             optimizer.step()
             tNet.reset()
             #print("\n\n")
-            steps = len(td_event_frames) // iter_steps
+            #steps = len(td_event_frames) // iter_steps
             """
             for i in range(steps):
                 ef = td_event_frames[:i*iter_steps]
@@ -283,9 +301,12 @@ def train():
                 """
                 
 
-            del td_event_frames
-            del td_clifford_coords
+            del event_frames
+            del targets
             del tensor_dict
+            del all_spikes
+            del out_clifford_coords
+
             torch.cuda.empty_cache()  # This will release the GPU memory back to the system
 
             ax.clear()  # clear previous plot

@@ -20,7 +20,7 @@ from matplotlib.animation import FuncAnimation
 import os
 
 from image_processing import rgb_to_gray, convert_gray_to_event
-from coords_processing import coords_to_clifford, coords_to_rad, coords_to_rad_scaling_factor, rad_to_coords, spike_history_to_clifford, spikes_to_clifford
+from coords_processing import coord_to_clifford, coords_to_rad, coords_to_rad_scaling_factor, rad_to_coords, spike_history_to_clifford, spikes_to_clifford
 
 def plot_images(cfg, plot_queue):
     fig, axs = plt.subplots(1, 4, figsize=(15, 5))
@@ -225,7 +225,7 @@ def gameLoop(cfg, plot_queue):
 
         coords = torch.tensor([envControl.local_x, envControl.local_z], dtype=torch.float32, device=cfg.device)
 
-        cliff = coords_to_clifford(cfg, coords)
+        cliff = coord_to_clifford(cfg, coords)
 
         # training data gen
         td_gray_frames = torch.cat((td_gray_frames, torch.from_numpy(prev_gray_frame).unsqueeze(0).to(cfg.device)), dim=0)
