@@ -58,11 +58,22 @@ def remove_and_normalize():
         # For demonstration purposes, we'll print out the first local_coords to show normalization
         #print(f"First local_coords of {file_path} normalized to:", tensor_dict['td_local_coords'][0].tolist())
 
-def generate_training_set():
+def test():
     cfg = load_config("config/default_config.yaml")
     file_paths = [f for f in os.listdir('data/localization') if f.endswith('.pt')]
     file_paths.sort()
+    print(len(file_paths))
+    """
+    for file_path in tqdm(file_paths):
+        # Load the tensor dictionary from the file
+        path = os.path.join("data/localization", file_path)
+        tensor_dict = torch.load(path)
 
+        coords = tensor_dict["td_local_coords"]
+        print(coords)
+        print("\n\n\n\n")
+    """
 if __name__ == "__main__":
     #remove_and_cap_to_1000()
-    remove_and_normalize()
+    #remove_and_normalize()
+    test()

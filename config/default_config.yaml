@@ -10,7 +10,7 @@ minedojo:
   world_seed: 42
   generate_world_type: "specified_biome"
   specified_biome: "plains"
-  minecraft_world_radius: 29999984
+  minecraft_world_radius: 90000
 
 preprocess_vision:
   intensity_treshold: 10
