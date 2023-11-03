@@ -74,13 +74,13 @@ class TopologyNet(nn.Module):
 
         # Initialize learnable beta and threshold parameters for each layer
         beta_conv1 = torch.rand(num_firstconv_width, device=cfg.device, requires_grad=True)
-        threshold_conv1 = torch.rand(num_firstconv_width, device=cfg.device, requires_grad=True)
+        #threshold_conv1 = torch.rand(num_firstconv_width, device=cfg.device, requires_grad=True)
 
         beta_conv2 = torch.rand(num_secondconv_width, device=cfg.device, requires_grad=True)
-        threshold_conv2 = torch.rand(num_secondconv_width, device=cfg.device, requires_grad=True)
+        #threshold_conv2 = torch.rand(num_secondconv_width, device=cfg.device, requires_grad=True)
 
-        beta_fc1 = torch.rand(num_hidden, device=cfg.device, requires_grad=True)
-        threshold_fc1 = torch.rand(num_hidden, device=cfg.device, requires_grad=True)
+        beta_fc1 = torch.rand(num_outputs, device=cfg.device, requires_grad=True)
+        #threshold_fc1 = torch.rand(num_outputs, device=cfg.device, requires_grad=True)
 
         beta_fc4 = torch.rand(num_outputs, device=cfg.device, requires_grad=True)
         threshold_fc4 = torch.rand(num_outputs, device=cfg.device, requires_grad=True)
@@ -93,41 +93,44 @@ class TopologyNet(nn.Module):
 
         # first conv
         self.conv1 = nn.Conv2d(1, params.conv1_output_dim, params.conv_kernel, stride=params.conv_stride)
-        self.lif_conv1 = snn.Leaky(beta=beta_conv1, learn_beta=True, threshold=threshold_conv1, learn_threshold=True, spike_grad=spike_grad)
+        self.lif_conv1 = snn.Leaky(beta=beta_conv1, learn_beta=True, spike_grad=spike_grad)
 
         # second conv
         self.conv2 = nn.Conv2d(params.conv1_output_dim, params.conv2_output_dim, params.conv_kernel, stride=params.conv_stride)
-        self.lif_conv2 = snn.Leaky(beta=beta_conv2, learn_beta=True, threshold=threshold_conv2, learn_threshold=True, spike_grad=spike_grad)
+        self.lif_conv2 = snn.Leaky(beta=beta_conv2, learn_beta=True, spike_grad=spike_grad)
         self.flatten = nn.Flatten()
 
         
-        self.fc1 = nn.Linear(num_secondconv, num_hidden)
-        self.lif_fc1 = snn.Leaky(beta=beta_fc1, learn_beta=True, threshold=threshold_fc1, learn_threshold=True, spike_grad=spike_grad)
+        self.fc1 = nn.Linear(num_secondconv, num_outputs)
+        self.lif_fc1 = snn.Leaky(beta=beta_fc1, learn_beta=True, spike_grad=spike_grad, output=True)
         #self.fc2 = nn.Linear(num_hidden, num_hidden)
         #self.lif_fc2 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
         #self.fc3 = nn.Linear(num_hidden, num_hidden)
         #self.lif_fc3 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
-        self.fc4 = nn.Linear(num_hidden, num_outputs)
-        self.lif_fc4 = snn.Leaky(beta=beta_fc4, learn_beta=True, threshold=threshold_fc4, learn_threshold=True, spike_grad=spike_grad, output=True)
+        #self.fc4 = nn.Linear(num_hidden, num_outputs)
+        #self.lif_fc4 = snn.Leaky(beta=beta_fc4, learn_beta=True, threshold=threshold_fc4, learn_threshold=True, spike_grad=spike_grad, output=True)
 
         #self.out_spks = torch.empty(0, device=self.cfg.device)
+        self.reset()
 
-    def forward(self, x):
-        mem_conv1 = self.lif_conv1.init_leaky()
-        mem_conv2 = self.lif_conv2.init_leaky()
-        mem_fc1 = self.lif_fc1.init_leaky()
+    def reset(self):
+        self.mem_conv1 = self.lif_conv1.init_leaky()
+        self.mem_conv2 = self.lif_conv2.init_leaky()
+        self.mem_fc1 = self.lif_fc1.init_leaky()
         #mem_fc2 = self.lif_fc2.init_leaky()
         #mem_fc3 = self.lif_fc3.init_leaky()
-        mem_fc4 = self.lif_fc4.init_leaky()
+        #mem_fc4 = self.lif_fc4.init_leaky()
+    def forward(self, x):
+
 
         conv1 = self.conv1(x.unsqueeze(0).permute(1,0,2,3))
         cur_conv1 = self.maxpool(conv1)
-        spk_conv1, mem_conv1 = self.lif_conv1(cur_conv1, mem_conv1)
+        spk_conv1, self.mem_conv1 = self.lif_conv1(cur_conv1, self.mem_conv1)
         spk_conv1_sum = spk_conv1.sum()
         #print()
         conv2 = self.conv2(spk_conv1)
         cur_conv2 = self.maxpool(conv2)
-        spk_conv2, mem_conv2 = self.lif_conv2(cur_conv2, mem_conv2)
+        spk_conv2, self.mem_conv2 = self.lif_conv2(cur_conv2, self.mem_conv2)
         spk_conv2_sum = spk_conv2.sum()
         #print(spk_conv2.sum())
         #reshaped = spk_conv2.view(self.params.batch_size, -1)
@@ -136,9 +139,9 @@ class TopologyNet(nn.Module):
         
         flat = self.flatten(spk_conv2)
         cur_fc1 = self.fc1(flat)
-        spk_fc1, mem_fc1 = self.lif_fc1(cur_fc1, mem_fc1)
+        spk_fc1, self.mem_fc1 = self.lif_fc1(cur_fc1, self.mem_fc1)
         #print(spk_fc1.sum())
-        #spk_fc1_sum = spk_fc1.sum()
+        spk_fc1_sum = spk_fc1.sum()
         #cur_fc2 = self.fc2(spk_fc1)
         #spk_fc2, mem_fc2 = self.lif_fc2(cur_fc2, mem_fc2)
         #print(spk_fc2.sum())
@@ -152,14 +155,14 @@ class TopologyNet(nn.Module):
         #print(spk_fc3.sum())
 
         #respahed = spk_fc3.view(self.params.batch_size, -1)
-        cur_fc4 = self.fc4(spk_fc1)
-        spk_fc4, mem_fc4 = self.lif_fc4(cur_fc4, mem_fc4)
-        spk_fc4_sum = spk_fc4.sum()
+        #cur_fc4 = self.fc4(spk_fc1)
+        #spk_fc4, mem_fc4 = self.lif_fc4(cur_fc4, mem_fc4)
+        #spk_fc4_sum = spk_fc4.sum()
 
         #print(spk_fc4.sum())
         #self.out_spks = torch.cat((self.out_spks, spk_fc4), 0) 
     
-        return spk_fc4, mem_fc4
+        return spk_fc1, self.mem_fc1
 
 def debug_net():
     from config.config import load_config
@@ -247,6 +250,22 @@ def spikes_to_clifford(cfg, spikes_tensor):
 
     return decoded_values_tensor
 
+
+def custom_loss(cfg,out, target):
+    # Map values from range [-1, 1] to [0, 2*pi]
+    mapped_output = out * torch.tensor(np.pi, device=cfg.device)
+    mapped_target = target * torch.tensor(np.pi, device=cfg.device)
+
+    # Compute the angular distances
+    abs_diff = torch.abs(mapped_output - mapped_target)
+    distances = torch.min(abs_diff, 2*torch.tensor(np.pi) - abs_diff)
+
+    # You might want to take the mean or sum of the distances,
+    # depending on your use case
+    loss = torch.mean(distances)
+
+    return loss
+
 def train():
     from config.config import load_config
     cfg = load_config("config/default_config.yaml")
@@ -286,8 +305,27 @@ def train():
             td_event_frames = tensor_dict['td_event_frames'].to(cfg.device)
             #td_local_coords = tensor_dict['td_local_coords'].to(cfg.device)
             td_clifford_coords = tensor_dict['td_clifford_coords'].to(cfg.device)
+            out_clifford_coords = torch.empty((0,4), device=cfg.device)
+            for i in tqdm(range(len(td_event_frames))):
+                ef = td_event_frames[i].unsqueeze(0)
+                spks, _ = tNet(ef)
+                cliff = spikes_to_clifford(cfg, spks)
+                out_clifford_coords = torch.cat((out_clifford_coords, cliff), dim=0)
             
+
+            #loss = torchF.mse_loss(out_clifford_coords, td_clifford_coords)
+            #loss_hist.append(loss.item())  # append loss of current iteration to loss_hist
+            #print(loss)
+            loss = custom_loss(cfg, out_clifford_coords, td_clifford_coords)
+            loss_hist.append(loss.item())  # append loss of current iteration to loss_hist
+    
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            tNet.reset()
+            #print("\n\n")
             steps = len(td_event_frames) // iter_steps
+            """
             for i in range(steps):
                 ef = td_event_frames[:i*iter_steps]
                 if (ef.numel() == False):
@@ -297,16 +335,13 @@ def train():
                 variances = spks.var(dim=1).detach().cpu().numpy()
                 var_2 = spks.var(dim=1).var(dim=0).detach().cpu().numpy()
 
+                if var_2 > 0.01:
+                    pass
+
 
                 out_clifford_coords = spikes_to_clifford(cfg, spks)
-                loss = torchF.mse_loss(out_clifford_coords, td_clifford_coords[:i*iter_steps])
-                loss_hist.append(loss.item())  # append loss of current iteration to loss_hist
-                #print(loss)
-        
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                #print("\n\n")
+                """
+                
 
             del td_event_frames
             del td_clifford_coords
@@ -318,7 +353,7 @@ def train():
             ax.set_xlabel('Iteration')
             ax.set_ylabel('Loss')
             ax.set_title('Loss Curve')
-            ax.set_ylim([0, 1])
+            ax.set_ylim([0, 3])
             fig.canvas.draw()
             fig.canvas.flush_events()
 

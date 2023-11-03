@@ -51,7 +51,7 @@ topology_net:
   beta: 0.2
   num_steps: 50
   batch_size: 1
-  lr: 0.05
+  lr: 0.005
   ephocs: 1000
 
 agent_net:
