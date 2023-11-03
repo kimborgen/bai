@@ -22,6 +22,8 @@ import torch.nn.functional as torchF
 import matplotlib.pyplot as plt
 import random
 
+from coords_processing import spike_history_to_clifford, coords_to_rad_scaling_factor, coords_to_rad, rad_to_coords, coords_to_clifford, spikes_to_clifford
+
 def calculate_output_shape(cfg):
     # Unpack input shape
     input_height, input_width = cfg.preprocess_vision.event_frame_shape
@@ -184,73 +186,6 @@ def debug_net():
         print("Outspks: ", spks.sum() >= 1)
         print("\n\n")
 
-def topology_net_train(cfg, tNet, target, optimizer):
-    params = cfg.topology_net.pos_xz
-    #spks = torch.randint(0, 2, size=(target.shape[0], 200)).to(cfg.device)
-    spks = tNet.out_spks
-
-    
-
-    """
-    # initialize the loss & sum over time
-    loss_val = loss_fn(spk_rec, targets)
-
-    # Gradient calculation + weight update
-    optimizer.zero_grad()
-    loss_val.backward()
-    optimizer.step()
-
-    # Store loss history for future plotting
-    loss_hist.append(loss_val.item())
-    """
-
-def spike_history_to_clifford(cfg, spks):
-    # Create a geometric sequence of weights
-    log_start = torch.tensor([1e-3], device=cfg.device).log()
-    log_end = torch.tensor([1.0], device=cfg.device).log()
-    log_steps = torch.linspace(0, 1, steps=cfg.topology_net.pos_xz.sliding_window, device=cfg.device)
-    log_space = log_start * (1 - log_steps) + log_end * log_steps
-    weights = torch.exp(log_space)
-    weights /= weights.sum()  # Normalize to sum to 1
-
-    # ... rest of your code ...
-
-    # Compute the weighted average along the 0-th dimension (over the iterations)
-    # Expand dimensions of weights to match the dimensions of window_spks
-    weights_expanded = weights.unsqueeze(1)
-    averaged_spks = torch.sum(spks * weights_expanded, dim=0)
-
-    # Scale averaged_spks from [0, 1] to [-1, 1]
-    scaled_spks = averaged_spks * 2 - 1
-    return scaled_spks
-
-
-def spikes_to_clifford(cfg, spikes_tensor):
-    # Assume spikes_tensor is of shape (iter, 200)
-    # Reshape the tensor to shape (iter, 4, 50)
-    reshaped_tensor = spikes_tensor.view(-1, 4, cfg.topology_net.pos_xz.pop_code)
-
-    # Generate neuron values tensor of shape (50)
-    neuron_values = torch.linspace(-1, 1, steps=cfg.topology_net.pos_xz.pop_code, device=cfg.device)
-
-    # Expand the dimensions of neuron_values to match the dimensions of reshaped_tensor
-    # New shape of neuron_values: (1, 1, 50)
-    neuron_values_expanded = neuron_values.unsqueeze(0).unsqueeze(0)
-
-    # Compute the weighted sum along the last dimension
-    # Shape of weighted_sum: (iter, 4)
-    weighted_sum = torch.sum(reshaped_tensor * neuron_values_expanded, dim=2)
-
-    # Compute the number of active neurons along the last dimension
-    # Shape of num_active_neurons: (iter, 4)
-    num_active_neurons = torch.sum(reshaped_tensor, dim=2) + 1e-10
-
-    # Compute the decoded values
-    decoded_values_tensor = weighted_sum / num_active_neurons
-
-    return decoded_values_tensor
-
-
 def custom_loss(cfg,out, target):
     # Map values from range [-1, 1] to [0, 2*pi]
     mapped_output = out * torch.tensor(np.pi, device=cfg.device)
@@ -265,6 +200,10 @@ def custom_loss(cfg,out, target):
     loss = torch.mean(distances)
 
     return loss
+
+def preprocess_training_data(cfg, tensor_dict, cap):
+    td_gray_frames = tensor_dict["td_gray_frames"].to(cfg.device)
+    td_local_coords = tensor_dict['td_local_coords'].to(cfg.device)
 
 def train():
     from config.config import load_config
@@ -297,14 +236,15 @@ def train():
 
     iter_steps = 30
 
+    cap = 100
+
     for epoch in tqdm(range(cfg.topology_net.ephocs)):
         for i, file_path in enumerate(tqdm(train_files)):
             # Load the tensor dictionary from the current file
             tensor_dict = torch.load("data/localization/" + file_path)
-            #td_gray_frames = tensor_dict["td_gray_frames"].to(cfg.device)
-            td_event_frames = tensor_dict['td_event_frames'].to(cfg.device)
-            #td_local_coords = tensor_dict['td_local_coords'].to(cfg.device)
-            td_clifford_coords = tensor_dict['td_clifford_coords'].to(cfg.device)
+            
+            event_frames, targets = preprocess_training_data(cfg, tensor_dict, cap)
+
             out_clifford_coords = torch.empty((0,4), device=cfg.device)
             for i in tqdm(range(len(td_event_frames))):
                 ef = td_event_frames[i].unsqueeze(0)
