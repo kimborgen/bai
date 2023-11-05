@@ -29,7 +29,7 @@ topology_net:
   train: True
   pos_xz:
     num_outputs: 4
-    pop_code: 50
+    pop_code: 400
     torus_radius: 1
     coord_wrap: 50
   orientation:
@@ -50,7 +50,7 @@ topology_net:
   spike_grad: "fast_sigmoid"
   beta: 0.2
   num_steps: 50
-  batch_size: 1
+  batch_size: 32
   lr: 0.005
   ephocs: 1000
 

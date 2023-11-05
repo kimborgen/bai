@@ -198,7 +198,7 @@ def custom_loss(cfg,out, target):
 
     # You might want to take the mean or sum of the distances,
     # depending on your use case
-    loss = torch.mean(distances)
+    loss = torch.sum(distances ** 2)
 
     return loss
 
@@ -251,54 +251,56 @@ def train():
 
     iter_steps = 30
 
-    cap = 101
+    cap = 1001
+    batch_size = cfg.topology_net.batch_size
+    num_out_spks = cfg.topology_net.pos_xz.pop_code * cfg.topology_net.pos_xz.num_outputs
 
     for epoch in tqdm(range(cfg.topology_net.ephocs)):
+        batch_event_frames = torch.empty((0,cap-1,2,80,128), device=cfg.device)
+        batch_targets = torch.empty((0,cap-1,4), device=cfg.device)
+
         for i, file_path in enumerate(tqdm(train_files)):
             # Load the tensor dictionary from the current file
             tensor_dict = torch.load("data/localization/" + file_path)
             
             event_frames, targets = preprocess_training_data(cfg, tensor_dict, cap)
-            out_clifford_coords = torch.empty((0,4), device=cfg.device)
-            all_spikes = torch.empty((0,200), device=cfg.device)
+            batch_event_frames = torch.cat((batch_event_frames, event_frames.unsqueeze(0)), dim=0)
+            batch_targets = torch.cat((batch_targets, targets.unsqueeze(0)), dim=0)
+            
+            if batch_targets.shape[0] < batch_size:
+                continue
 
-            for i in tqdm(range(len(event_frames))):
-                # unsqueeze for batch=1
-                ef = event_frames[i].unsqueeze(0)
+            out_clifford_coords = torch.empty((0,batch_size,4), device=cfg.device)
+            all_spikes = torch.empty((0, batch_size, num_out_spks), device=cfg.device)
+
+            # reshape event frames so that cap is first
+            # # batch_event_frames is shape (batch_size, cap-1, 2, 80, 128)
+            batch_event_frames = batch_event_frames.permute((1,0,2,3,4))
+            # Batch targets is shape (batch_size, cap-1, 4)
+            batch_targets = batch_targets.permute((1,0,2))
+
+            for j in range(batch_targets.shape[0]):
+                ef = batch_event_frames[j]
                 spks, _ = tNet(ef) #spks.shape(1,200) where 1 is batch
                 #all_spikes = torch.cat((all_spikes, spks), dim=0)
                 cliff = spikes_to_clifford(cfg, spks)
-                out_clifford_coords = torch.cat((out_clifford_coords, cliff), dim=0)
+                out_clifford_coords = torch.cat((out_clifford_coords, cliff.unsqueeze(0)), dim=0)
             
+            # repermute the cap and batch dimensions
+            #batch_event_frames = batch_event_frames.permute((1,0,2,3,4))
+            batch_targets = batch_targets.permute((1,0,2))
+            out_clifford_coords = out_clifford_coords.permute((1,0,2))
 
-            #loss = torchF.mse_loss(out_clifford_coords, td_clifford_coords)
-            #loss_hist.append(loss.item())  # append loss of current iteration to loss_hist
-            #print(loss)
-            loss = custom_loss(cfg, out_clifford_coords, targets)
+            loss = custom_loss(cfg, out_clifford_coords, batch_targets)
             loss_hist.append(loss.item())  # append loss of current iteration to loss_hist
     
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             tNet.reset()
-            #print("\n\n")
-            #steps = len(td_event_frames) // iter_steps
-            """
-            for i in range(steps):
-                ef = td_event_frames[:i*iter_steps]
-                if (ef.numel() == False):
-                    continue
-                spks, _ = tNet(ef)
-                #print(spks.sum())
-                variances = spks.var(dim=1).detach().cpu().numpy()
-                var_2 = spks.var(dim=1).var(dim=0).detach().cpu().numpy()
 
-                if var_2 > 0.01:
-                    pass
-
-
-                out_clifford_coords = spikes_to_clifford(cfg, spks)
-                """
+            batch_event_frames = torch.empty((0,cap-1,2,80,128), device=cfg.device)
+            batch_targets = torch.empty((0,cap-1,4), device=cfg.device)
                 
 
             del event_frames
@@ -306,6 +308,7 @@ def train():
             del tensor_dict
             del all_spikes
             del out_clifford_coords
+            del loss
 
             torch.cuda.empty_cache()  # This will release the GPU memory back to the system
 
@@ -314,7 +317,7 @@ def train():
             ax.set_xlabel('Iteration')
             ax.set_ylabel('Loss')
             ax.set_title('Loss Curve')
-            ax.set_ylim([0, 3])
+            #ax.set_ylim([0, 3])
             fig.canvas.draw()
             fig.canvas.flush_events()
 
