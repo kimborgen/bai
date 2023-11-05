@@ -198,7 +198,7 @@ def custom_loss(cfg,out, target):
 
     # You might want to take the mean or sum of the distances,
     # depending on your use case
-    loss = torch.sum(distances ** 2)
+    loss = torch.mean(distances ** 2)
 
     return loss
 
