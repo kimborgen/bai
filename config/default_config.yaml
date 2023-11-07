@@ -13,7 +13,7 @@ minedojo:
   minecraft_world_radius: 90000
 
 preprocess_vision:
-  intensity_treshold: 10
+  intensity_treshold: 30
   downscale_factor: 2
   event_frame_shape: "derived"
 
@@ -28,7 +28,7 @@ env_control:
 topology_net:
   train: True
   pos_xz:
-    num_outputs: 4
+    num_outputs: 2
     pop_code: 50
     rate_pop_code: 8
     torus_radius: 1
@@ -44,7 +44,7 @@ topology_net:
   conv_kernel: 5
   conv_stride: 2
   conv1_output_dim: 12
-  conv2_output_dim: 64
+  conv2_output_dim: 32
   hidden_scale: 1
   alpha: 0.9
   slope: 25
@@ -52,7 +52,7 @@ topology_net:
   beta: 0.2
   num_steps: 50
   batch_size: 16
-  lr: 0.05
+  lr: 0.003
   ephocs: 1000
   dropout_rate: 0.3
   mem_dropout_rate: 0.05

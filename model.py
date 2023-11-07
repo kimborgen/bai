@@ -21,8 +21,9 @@ from tqdm import tqdm
 import torch.nn.functional as torchF
 import matplotlib.pyplot as plt
 import random
+import math
 
-from coords_processing import rate_code_to_cliff, coords_to_clifford, spikes_to_clifford, spikes_to_rate_code
+from coords_processing import rate_code_to_cliff, coords_to_clifford, spikes_to_clifford, spikes_to_rate_code, coords_to_rad, coords_to_rad_scaling_factor
 from image_processing import convert_gray_to_event_with_polarity
 
 def calculate_output_shape(cfg):
@@ -63,6 +64,7 @@ class TopologyNet(nn.Module):
         self.cfg = cfg # if needed, use self.params for simplicity
         params = cfg.topology_net
         self.params = params
+
         assert self.params.spike_grad == "fast_sigmoid"
         spike_grad = surrogate.fast_sigmoid(slope=params.slope)
 
@@ -73,7 +75,7 @@ class TopologyNet(nn.Module):
         num_firstconv, num_firstconv_width, num_secondconv, num_secondconv_width = calculate_output_shape(cfg)
         num_hidden = num_secondconv * params.hidden_scale
         num_outputs = params.pos_xz.num_outputs * params.pos_xz.pop_code * params.pos_xz.rate_pop_code
-        
+        self.num_outputs = num_outputs
 
         # Initialize learnable beta and threshold parameters for each layer
         beta_conv1 = torch.rand(num_firstconv_width, device=cfg.device, requires_grad=True)
@@ -85,57 +87,66 @@ class TopologyNet(nn.Module):
         beta_fc1 = torch.rand(num_outputs, device=cfg.device, requires_grad=True)
         #threshold_fc1 = torch.rand(num_outputs, device=cfg.device, requires_grad=True)
 
-        beta_fc4 = torch.rand(num_outputs, device=cfg.device, requires_grad=True)
-        threshold_fc4 = torch.rand(num_outputs, device=cfg.device, requires_grad=True)
+        beta_fc2 = torch.rand(num_outputs, device=cfg.device, requires_grad=True)
+        #threshold_fc4 = torch.rand(num_outputs, device=cfg.device, requires_grad=True)
 
 
         # Initialize layers
         # shared
         self.maxpool = nn.MaxPool2d(params.maxpool2d_kernel)
 
-        self.dropout1 = nn.Dropout(p=cfg.topology_net.dropout_rate)
-        self.mem_dropout1 = nn.Dropout(p=cfg.topology_net.mem_dropout_rate)
-        self.dropout2 = nn.Dropout(p=cfg.topology_net.dropout_rate)
-        self.mem_dropout2 = nn.Dropout(p=cfg.topology_net.mem_dropout_rate)
-        self.dropout_fc1 = nn.Dropout(p=cfg.topology_net.dropout_rate)
-        self.mem_dropoutfc1 = nn.Dropout(p=cfg.topology_net.mem_dropout_rate)
+        #self.dropout1 = nn.Dropout(p=cfg.topology_net.dropout_rate)
+        #self.mem_dropout1 = nn.Dropout(p=cfg.topology_net.mem_dropout_rate)
+        #self.dropout2 = nn.Dropout(p=cfg.topology_net.dropout_rate)
+        #self.mem_dropout2 = nn.Dropout(p=cfg.topology_net.mem_dropout_rate)
+        #self.dropout_fc1 = nn.Dropout(p=cfg.topology_net.dropout_rate)
+        #self.mem_dropoutfc1 = nn.Dropout(p=cfg.topology_net.mem_dropout_rate)
 
         # first conv
         self.conv1 = nn.Conv2d(2, params.conv1_output_dim, params.conv_kernel, stride=params.conv_stride)
-        self.lif_conv1 = snn.Leaky(beta=beta_conv1, learn_beta=True, spike_grad=spike_grad)
+        self.lif_conv1 = snn.Leaky(beta=beta_conv1, learn_beta=True, spike_grad=spike_grad, reset_mechanism="zero")
 
         # second conv
         self.conv2 = nn.Conv2d(params.conv1_output_dim, params.conv2_output_dim, params.conv_kernel, stride=params.conv_stride)
-        self.lif_conv2 = snn.Leaky(beta=beta_conv2, learn_beta=True, spike_grad=spike_grad)
+        self.lif_conv2 = snn.Leaky(beta=beta_conv2, learn_beta=True, spike_grad=spike_grad, reset_mechanism="zero")
         self.flatten = nn.Flatten()
 
         
         self.fc1 = nn.Linear(num_secondconv, num_outputs)
-        self.lif_fc1 = snn.Leaky(beta=beta_fc1, learn_beta=True, spike_grad=spike_grad, output=True)
-        #self.fc2 = nn.Linear(num_hidden, num_hidden)
-        #self.lif_fc2 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
-        #self.fc3 = nn.Linear(num_hidden, num_hidden)
-        #self.lif_fc3 = snn.Leaky(beta=params.beta, spike_grad=spike_grad)
-        #self.fc4 = nn.Linear(num_hidden, num_outputs)
-        #self.lif_fc4 = snn.Leaky(beta=beta_fc4, learn_beta=True, threshold=threshold_fc4, learn_threshold=True, spike_grad=spike_grad, output=True)
+        self.lif_fc1 = snn.Leaky(beta=beta_fc1, learn_beta=True, spike_grad=spike_grad, reset_mechanism="zero")
+        self.fc2 = nn.Linear(num_outputs, num_outputs)
+        self.lif_fc2 = snn.Leaky(beta=beta_fc2, learn_beta=True, spike_grad=spike_grad, output=True, reset_mechanism="zero")
 
         #self.out_spks = torch.empty(0, device=self.cfg.device)
+        num_ann_inp = num_outputs // cfg.topology_net.pos_xz.rate_pop_code
+        self.ann_seq = nn.Sequential(
+            nn.Linear(num_ann_inp, num_ann_inp * 2),
+            nn.Dropout(),
+            nn.ReLU(),
+            nn.Linear(num_ann_inp * 2, num_ann_inp),
+            nn.Dropout(),
+            nn.ReLU(),
+            nn.Linear(num_ann_inp, 2),
+            nn.Dropout(),
+            nn.Tanh()
+        )
         self.reset()
 
     def reset(self):
+        self.spks = torch.empty((0, self.params.batch_size, self.num_outputs), device=self.cfg.device, requires_grad=True, dtype=torch.float32)
         self.mem_conv1 = self.lif_conv1.init_leaky()
         self.mem_conv2 = self.lif_conv2.init_leaky()
         self.mem_fc1 = self.lif_fc1.init_leaky()
         #mem_fc2 = self.lif_fc2.init_leaky()
         #mem_fc3 = self.lif_fc3.init_leaky()
-        #mem_fc4 = self.lif_fc4.init_leaky()
+        self.mem_fc2 = self.lif_fc2.init_leaky()
     def forward(self, x):
 
 
         conv1 = self.conv1(x)
         cur_conv1 = self.maxpool(conv1)
         spk_conv1, self.mem_conv1 = self.lif_conv1(cur_conv1, self.mem_conv1)
-        spk_conv1 = self.dropout1(spk_conv1)
+        #spk_conv1 = self.dropout1(spk_conv1)
         #self.mem_conv1 = self.mem_dropout1(self.mem_conv1)
         spk_conv1_sum = spk_conv1.sum()
         #print()
@@ -170,14 +181,21 @@ class TopologyNet(nn.Module):
         #print(spk_fc3.sum())
 
         #respahed = spk_fc3.view(self.params.batch_size, -1)
-        #cur_fc4 = self.fc4(spk_fc1)
-        #spk_fc4, mem_fc4 = self.lif_fc4(cur_fc4, mem_fc4)
-        #spk_fc4_sum = spk_fc4.sum()
+        cur_fc2 = self.fc2(spk_fc1)
+        spk_fc2, self.mem_fc2 = self.lif_fc2(cur_fc2, self.mem_fc2)
+        spk_fc2_sum = spk_fc2.sum()
 
         #print(spk_fc4.sum())
         #self.out_spks = torch.cat((self.out_spks, spk_fc4), 0) 
+
+        self.spks = torch.cat((self.spks, spk_fc2.unsqueeze(0)), dim=0)
+
+        # allright, ANN time
+        rate_code = spikes_to_rate_code(self.cfg, self.spks)
+
+        out = self.ann_seq(rate_code)
     
-        return spk_fc1, self.mem_fc1
+        return out
 
 def debug_net():
     from config.config import load_config
@@ -214,21 +232,39 @@ def custom_loss(cfg,out, target):
 
     return loss
 
+def wrap_around_zero(coords):
+    # Wrap around -1 and 1
+    return coords - 2 * torch.floor((coords + 1) / 2)
+
+def rad_to_coords(cfg, coords):
+    scaling_factor = coords_to_rad_scaling_factor(cfg)
+    return coords / scaling_factor
+
+def normalize_coords(cfg, rad_coords):
+    # Normalize the radian values to be within the range (-1, 1)
+    return rad_coords / math.pi - 1
+
 def preprocess_training_data(cfg, tensor_dict, cap):
     # Extract saved tensors and cap them
     td_gray_frames = tensor_dict["td_gray_frames"][:cap].to(cfg.device)
-    td_local_coords = tensor_dict['td_local_coords'][:cap].to(cfg.device)
+    td_local_coords = tensor_dict['td_local_coords'][1:cap].to(cfg.device)
 
     # get event frames
     event_frames = convert_gray_to_event_with_polarity(cfg, td_gray_frames)
     
     # get target
-    targets = coords_to_clifford(cfg, td_local_coords)
+    #targets = coords_to_clifford(cfg, td_local_coords)
     
-    # drop the first, because the first gray_frame is dropped 
-    targets = targets[1:]
+     # Convert coordinates to radians
+    rad_coords = coords_to_rad(cfg, td_local_coords)
 
-    return event_frames, targets
+    # Normalize coordinates to be within the range (-1, 1)
+    normalized_coords = normalize_coords(cfg, rad_coords)
+
+    # Wrap around zero
+    wrapped_coords = wrap_around_zero(normalized_coords)
+
+    return event_frames, wrapped_coords
 
 
 
@@ -238,6 +274,7 @@ def train():
     
     tNet = TopologyNet(cfg).to(cfg.device)
     optimizer = torch.optim.Adam(tNet.parameters(), lr=cfg.topology_net.lr, betas=(0.9, 0.999))
+    loss_fn = nn.MSELoss()
     loss_hist = []
     test_acc_hist = []
 
@@ -271,7 +308,7 @@ def train():
 
     for epoch in tqdm(range(cfg.topology_net.ephocs)):
         batch_event_frames = torch.empty((0,cap-1,2,80,128), device=cfg.device)
-        batch_targets = torch.empty((0,cap-1,4), device=cfg.device)
+        batch_targets = torch.empty((0,cap-1,2), device=cfg.device)
 
         for i, file_path in enumerate(tqdm(train_files)):
             # Load the tensor dictionary from the current file
@@ -286,7 +323,7 @@ def train():
 
             out_clifford_coords = torch.empty((0,batch_size,4), device=cfg.device)
 
-            all_spikes = torch.empty((0,batch_size,num_out_spks), device=cfg.device)
+            all_out = torch.empty((0,batch_size, 2), device=cfg.device, dtype=torch.float32)
 
             # reshape event frames so that cap is first
             # # batch_event_frames is shape (batch_size, cap-1, 2, 80, 128)
@@ -296,19 +333,15 @@ def train():
 
             for j in range(batch_targets.shape[0]):
                 ef = batch_event_frames[j]
-                spks, _ = tNet(ef) #spks.shape(1,200) where 1 is batch
-                all_spikes = torch.cat((all_spikes, spks.unsqueeze(0)), dim=0)
-                rate_codes = spikes_to_rate_code(cfg, all_spikes) # (32, 800) (batch size, outners//ratepopcode)
-                cliff = rate_code_to_cliff(cfg, rate_codes)
-                #cliff = spikes_to_clifford(cfg, spks)
-                out_clifford_coords = torch.cat((out_clifford_coords, cliff.unsqueeze(0)), dim=0)
+                out = tNet(ef) # out shape [batch, 2?]
+                all_out = torch.cat((all_out, out.unsqueeze(0)), dim=0)
             
             # repermute the cap and batch dimensions
             #batch_event_frames = batch_event_frames.permute((1,0,2,3,4))
             batch_targets = batch_targets.permute((1,0,2))
-            out_clifford_coords = out_clifford_coords.permute((1,0,2))
+            all_out = all_out.permute((1,0,2))
 
-            loss = custom_loss(cfg, out_clifford_coords, batch_targets)
+            loss = loss_fn(all_out, batch_targets)
             loss_hist.append(loss.item())  # append loss of current iteration to loss_hist
     
             optimizer.zero_grad()
@@ -318,9 +351,6 @@ def train():
 
             del event_frames
             del targets
-            del tensor_dict
-            del all_spikes
-            del out_clifford_coords
             del loss
             del batch_targets
             del batch_event_frames
@@ -328,14 +358,14 @@ def train():
             torch.cuda.empty_cache()  # This will release the GPU memory back to the system
 
             batch_event_frames = torch.empty((0,cap-1,2,80,128), device=cfg.device)
-            batch_targets = torch.empty((0,cap-1,4), device=cfg.device)
+            batch_targets = torch.empty((0,cap-1,2), device=cfg.device)
 
             ax.clear()  # clear previous plot
             ax.plot(loss_hist)
             ax.set_xlabel('Iteration')
             ax.set_ylabel('Loss')
             ax.set_title('Loss Curve')
-            ax.set_ylim([0, 7])
+            #ax.set_ylim([0, 7])
             fig.canvas.draw()
             fig.canvas.flush_events()
 
