@@ -29,9 +29,10 @@ topology_net:
   train: True
   pos_xz:
     num_outputs: 4
-    pop_code: 400
+    pop_code: 200
+    rate_pop_code: 4
     torus_radius: 1
-    coord_wrap: 50
+    coord_wrap: 20
   orientation:
     num_outputs: 0
     pc: 3
@@ -53,6 +54,9 @@ topology_net:
   batch_size: 32
   lr: 0.005
   ephocs: 1000
+  dropout_rate: 0.3
+  mem_dropout_rate: 0.05
+  rate_code_window: 200
 
 agent_net:
   num_outputs: 60

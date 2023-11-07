@@ -93,6 +93,12 @@ class TopologyNet(nn.Module):
         # shared
         self.maxpool = nn.MaxPool2d(params.maxpool2d_kernel)
 
+        self.dropout1 = nn.Dropout(p=cfg.topology_net.dropout_rate)
+        self.mem_dropout1 = nn.Dropout(p=cfg.topology_net.mem_dropout_rate)
+        self.dropout2 = nn.Dropout(p=cfg.topology_net.dropout_rate)
+        self.mem_dropout2 = nn.Dropout(p=cfg.topology_net.mem_dropout_rate)
+        self.dropout_fc1 = nn.Dropout(p=cfg.topology_net.dropout_rate)
+        self.mem_dropoutfc1 = nn.Dropout(p=cfg.topology_net.mem_dropout_rate)
 
         # first conv
         self.conv1 = nn.Conv2d(2, params.conv1_output_dim, params.conv_kernel, stride=params.conv_stride)
@@ -129,11 +135,15 @@ class TopologyNet(nn.Module):
         conv1 = self.conv1(x)
         cur_conv1 = self.maxpool(conv1)
         spk_conv1, self.mem_conv1 = self.lif_conv1(cur_conv1, self.mem_conv1)
+        spk_conv1 = self.dropout1(spk_conv1)
+        self.mem_conv1 = self.mem_dropout1(self.mem_conv1)
         spk_conv1_sum = spk_conv1.sum()
         #print()
         conv2 = self.conv2(spk_conv1)
         cur_conv2 = self.maxpool(conv2)
         spk_conv2, self.mem_conv2 = self.lif_conv2(cur_conv2, self.mem_conv2)
+        spk_conv2 = self.dropout2(spk_conv2)
+        self.mem_conv2 = self.mem_dropout2(self.mem_conv2)
         spk_conv2_sum = spk_conv2.sum()
         #print(spk_conv2.sum())
         #reshaped = spk_conv2.view(self.params.batch_size, -1)
@@ -143,6 +153,8 @@ class TopologyNet(nn.Module):
         flat = self.flatten(spk_conv2)
         cur_fc1 = self.fc1(flat)
         spk_fc1, self.mem_fc1 = self.lif_fc1(cur_fc1, self.mem_fc1)
+        spk_fc1 = self.dropout_fc1(spk_fc1)
+        self.mem_fc1 = self.mem_dropoutfc1(self.mem_fc1)
         #print(spk_fc1.sum())
         spk_fc1_sum = spk_fc1.sum()
         #cur_fc2 = self.fc2(spk_fc1)
