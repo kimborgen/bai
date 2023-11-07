@@ -29,10 +29,10 @@ topology_net:
   train: True
   pos_xz:
     num_outputs: 4
-    pop_code: 200
-    rate_pop_code: 4
+    pop_code: 50
+    rate_pop_code: 8
     torus_radius: 1
-    coord_wrap: 20
+    coord_wrap: 10
   orientation:
     num_outputs: 0
     pc: 3
@@ -51,12 +51,12 @@ topology_net:
   spike_grad: "fast_sigmoid"
   beta: 0.2
   num_steps: 50
-  batch_size: 32
-  lr: 0.005
+  batch_size: 16
+  lr: 0.05
   ephocs: 1000
   dropout_rate: 0.3
   mem_dropout_rate: 0.05
-  rate_code_window: 200
+  rate_code_window: 100
 
 agent_net:
   num_outputs: 60

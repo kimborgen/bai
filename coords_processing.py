@@ -85,3 +85,53 @@ def spikes_to_clifford(cfg, spikes_tensor):
     decoded_values_tensor = weighted_sum / num_active_neurons
 
     return decoded_values_tensor
+
+def spikes_to_rate_code(cfg, spk_history):
+    # Reshape spk_history to handle operations for groups of 4 neurons
+    iters, batch_size, _ = spk_history.shape
+    rate_pop_code = cfg.topology_net.pos_xz.rate_pop_code
+    num_outputs = cfg.topology_net.pos_xz.pop_code * rate_pop_code * cfg.topology_net.pos_xz.num_outputs
+    reshaped_spk_history = spk_history.view(iters, batch_size, num_outputs // rate_pop_code, rate_pop_code)
+
+    # Determine the window size
+    window_size = min(iters, cfg.topology_net.rate_code_window)
+
+    # Generate a slow exponential/polynomial weighting (e.g., squared function)
+    weights = torch.linspace(1, window_size, steps=window_size, device=cfg.device)
+    weights = torch.pow(weights / window_size, 1.5)  # Squaring the normalized weights
+    max_val = weights.sum()  # The maximum possible value given the weights
+
+    # Reshape and expand weights to match the dimensions of reshaped_spk_history
+    weights = weights.view(window_size, 1, 1, 1).expand(window_size, batch_size, num_outputs // rate_pop_code, rate_pop_code)
+
+    # Apply weights to the last 'window_size' iterations
+    weighted_history = reshaped_spk_history[-window_size:] * weights
+
+    # Compute the weighted average for each group of neurons
+    # Summing over both the iterations and the neuron groups
+    sum_over_iters = weighted_history.sum(dim=0)
+    normalized_sum = sum_over_iters / max_val
+
+    # Compute the mean across the neuron group dimension
+    rate_code = torch.mean(normalized_sum, dim=-1)
+
+    # Normalize the rate code to be between -1 and 1
+    # normalized_rate_code = 2 * rate_code - 1
+
+    # I think the view is redudant... todo
+    # Reshape the normalized_rate_code to match the original output structure
+    #return normalized_rate_code.view(batch_size, num_outputs // rate_pop_code)
+    return rate_code
+
+def rate_code_to_cliff(cfg, rate_codes):
+    # Generate neuron values tensor of shape (pop_code)
+    neuron_values = torch.linspace(-1, 1, steps=cfg.topology_net.pos_xz.pop_code, device=cfg.device)
+
+    # Reshape rate_codes to separate each group of pop_code neurons
+    batch_size = rate_codes.shape[0]
+    reshaped_rate_codes = rate_codes.view(batch_size, -1, cfg.topology_net.pos_xz.pop_code)
+
+    # Compute the decoded value for each group by summing across the pop_code dimension
+    decoded_values_tensor = torch.mean(reshaped_rate_codes * neuron_values, dim=2)
+
+    return decoded_values_tensor
